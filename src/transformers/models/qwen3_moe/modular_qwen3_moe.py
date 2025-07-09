@@ -245,6 +245,8 @@ class Qwen3MoeForCausalLM(MixtralForCausalLM):
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs: MoeModelOutputWithPast = self.model(
+            use_probabilistic_routing=use_probabilistic_routing,
+            prob_routing_temp=prob_routing_temp,
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,

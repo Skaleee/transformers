@@ -769,6 +769,15 @@ class PhimoeSparseMoeBlock(nn.Module):
             training=self.training,
         )
 
+        if not use_probabilistic_routing:
+            routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        else:
+            temp_scaled_logits = router_logits / prob_routing_temp
+            temp_scaled_weights = F.softmax(temp_scaled_logits, dim=1, dtype=torch.float)
+            selected_experts = torch.multinomial(temp_scaled_weights, self.top_k, replacement=False)
+            #print(selected_experts.to('cpu').to(torch.get_default_dtype()))
+            routing_weights = routing_weights.gather(dim=1, index=selected_experts)
+
         final_hidden_states = torch.zeros(
             (batch_size * sequence_length, hidden_dim), dtype=hidden_states.dtype, device=hidden_states.device
         )
