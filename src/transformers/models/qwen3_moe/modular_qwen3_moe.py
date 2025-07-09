@@ -76,15 +76,25 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
             [Qwen3MoeMLP(config, intermediate_size=config.moe_intermediate_size) for _ in range(self.num_experts)]
         )
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, 
+                use_probabilistic_routing: bool,
+                prob_routing_temp: float) -> torch.Tensor:
         """ """
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         hidden_states = hidden_states.view(-1, hidden_dim)
         # router_logits: (batch * sequence_length, n_experts)
         router_logits = self.gate(hidden_states)
 
+        
         routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        if not use_probabilistic_routing:
+            routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
+        else:
+            temp_scaled_logits = router_logits / prob_routing_temp
+            temp_scaled_weights = F.softmax(temp_scaled_logits, dim=1, dtype=torch.float)
+            selected_experts = torch.multinomial(temp_scaled_weights, self.top_k, replacement=False)
+            #print(selected_experts.to('cpu').to(torch.get_default_dtype()))
+            routing_weights = routing_weights.gather(dim=1, index=selected_experts)
         if self.norm_topk_prob:  # only diff with mixtral sparse moe block!
             routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         # we cast back to the input dtype
@@ -141,6 +151,8 @@ class Qwen3MoeDecoderLayer(Qwen2MoeDecoderLayer, nn.Module):
     def forward(
         self,
         hidden_states: torch.Tensor,
+        use_probabilistic_routing: bool,
+        prob_routing_temp: float,
         position_embeddings: tuple[torch.Tensor, torch.Tensor],
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -167,7 +179,9 @@ class Qwen3MoeDecoderLayer(Qwen2MoeDecoderLayer, nn.Module):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states = self.mlp(hidden_states)
+        hidden_states = self.mlp(hidden_states,
+                                                use_probabilistic_routing=use_probabilistic_routing,
+                                                prob_routing_temp=prob_routing_temp)
         # For the MoE layers, we need to unpack
         if isinstance(hidden_states, tuple):
             hidden_states, _ = hidden_states
@@ -188,6 +202,8 @@ class Qwen3MoeForCausalLM(MixtralForCausalLM):
 
     def forward(
         self,
+        use_probabilistic_routing: bool,
+        prob_routing_temp: float,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
