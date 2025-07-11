@@ -246,8 +246,6 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
             routing_weights = routing_weights.gather(dim=1, index=selected_experts)
         if self.norm_topk_prob:  # only diff with mixtral sparse moe block!
             routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
-        if self.norm_topk_prob:  # only diff with mixtral sparse moe block!
-            routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
         # we cast back to the input dtype
         routing_weights = routing_weights.to(hidden_states.dtype)
 
@@ -666,6 +664,8 @@ class Qwen3MoeForCausalLM(Qwen3MoePreTrainedModel, GenerationMixin):
     @auto_docstring
     def forward(
         self,
+        use_probabilistic_routing: bool,
+        prob_routing_temp: float,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -708,6 +708,8 @@ class Qwen3MoeForCausalLM(Qwen3MoePreTrainedModel, GenerationMixin):
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs: MoeModelOutputWithPast = self.model(
             input_ids=input_ids,
+            use_probabilistic_routing=use_probabilistic_routing,
+            prob_routing_temp=prob_routing_temp,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
