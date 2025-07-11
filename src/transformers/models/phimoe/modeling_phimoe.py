@@ -741,7 +741,7 @@ class PhimoeSparseMoeBlock(nn.Module):
     assignments of tokens to experts, whereas standard MoE either
     (1) drop tokens at the cost of reduced performance or (2) set
     capacity factor to number of experts and thus waste computation
-    and memory on padding.
+    and memory on padding. 
     """
 
     def __init__(self, config):
@@ -889,7 +889,7 @@ class PhimoeDecoderLayer(GradientCheckpointingLayer):
                                     use_probabilistic_routing=use_probabilistic_routing,
                                     prob_routing_temp=prob_routing_temp)
         hidden_states = residual + hidden_states
-
+        print()
         outputs = (hidden_states,)
 
         if output_attentions:
