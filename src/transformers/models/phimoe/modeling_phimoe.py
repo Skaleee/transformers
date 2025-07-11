@@ -778,13 +778,20 @@ class PhimoeSparseMoeBlock(nn.Module):
                 jitter_eps=self.router_jitter_noise,
                 training=self.training,
             )
-            routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
         else:
-            routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
-            temp_scaled_logits = router_logits / prob_routing_temp
-            temp_scaled_weights = F.softmax(temp_scaled_logits, dim=1)
-            selected_experts = torch.multinomial(temp_scaled_weights, self.top_k, replacement=False)
-            routing_weights = routing_weights.gather(dim=1, index=selected_experts)
+            routing_weights, selected_experts = sparsemixer(
+                router_logits / prob_routing_temp,
+                jitter_eps=self.router_jitter_noise,
+                training=self.training,
+            )
+        
+        print(selected_experts)
+            # routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
+            # temp_scaled_logits = router_logits / prob_routing_temp
+            # temp_scaled_weights = F.softmax(temp_scaled_logits, dim=1)
+            # selected_experts = torch.multinomial(temp_scaled_weights, self.top_k, replacement=False)
+            # routing_weights = routing_weights.gather(dim=1, index=selected_experts)
+        routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
 
         final_hidden_states = torch.zeros(
             (batch_size * sequence_length, hidden_dim), dtype=hidden_states.dtype, device=hidden_states.device
@@ -889,7 +896,6 @@ class PhimoeDecoderLayer(GradientCheckpointingLayer):
                                     use_probabilistic_routing=use_probabilistic_routing,
                                     prob_routing_temp=prob_routing_temp)
         hidden_states = residual + hidden_states
-        print()
         outputs = (hidden_states,)
 
         if output_attentions:

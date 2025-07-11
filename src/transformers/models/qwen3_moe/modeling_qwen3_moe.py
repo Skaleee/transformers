@@ -709,8 +709,6 @@ class Qwen3MoeForCausalLM(Qwen3MoePreTrainedModel, GenerationMixin):
             use_probabilistic_routing=use_probabilistic_routing,
             prob_routing_temp=prob_routing_temp,
             input_ids=input_ids,
-            use_probabilistic_routing=use_probabilistic_routing,
-            prob_routing_temp=prob_routing_temp,
             attention_mask=attention_mask,
             position_ids=position_ids,
             past_key_values=past_key_values,
