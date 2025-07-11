@@ -785,7 +785,6 @@ class PhimoeSparseMoeBlock(nn.Module):
                 training=self.training,
             )
         
-        print(selected_experts)
             # routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
             # temp_scaled_logits = router_logits / prob_routing_temp
             # temp_scaled_weights = F.softmax(temp_scaled_logits, dim=1)
