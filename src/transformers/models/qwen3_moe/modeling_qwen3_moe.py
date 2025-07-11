@@ -666,6 +666,8 @@ class Qwen3MoeForCausalLM(Qwen3MoePreTrainedModel, GenerationMixin):
     @auto_docstring
     def forward(
         self,
+        use_probabilistic_routing: bool,
+        prob_routing_temp: float,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -700,13 +702,14 @@ class Qwen3MoeForCausalLM(Qwen3MoePreTrainedModel, GenerationMixin):
         >>> tokenizer.batch_decode(generate_ids, skip_special_tokens=True, clean_up_tokenization_spaces=False)[0]
         "Hey, are you conscious? Can you talk to me?\nI'm not conscious, but I can talk to you."
         ```"""
-
         output_router_logits = (
             output_router_logits if output_router_logits is not None else self.config.output_router_logits
         )
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs: MoeModelOutputWithPast = self.model(
+            use_probabilistic_routing=use_probabilistic_routing,
+            prob_routing_temp=prob_routing_temp,
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,

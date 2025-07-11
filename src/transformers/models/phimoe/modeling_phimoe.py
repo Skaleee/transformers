@@ -20,6 +20,7 @@ from typing import Optional, Union
 
 import torch
 import torch.utils.checkpoint
+import torch.nn.functional as F
 from torch import nn
 
 from ...activations import ACT2FN
@@ -720,6 +721,11 @@ def sparsemixer(scores, jitter_eps, training, top_k=2):
     multiplier = torch.concat((multiplier, multiplier_top2), dim=-1)
     selected_experts = torch.concat((selected_experts, selected_experts_top2), dim=-1)
 
+    # # Create full routing weight tensor
+    # batch_size, num_experts = scores.size()
+    # routing_weights = torch.zeros(batch_size, num_experts, device=scores.device, dtype=scores.dtype)
+    # routing_weights.scatter_(1, selected_experts, multiplier)  # Populate top-k weights
+
     return (
         multiplier,
         selected_experts,
@@ -753,7 +759,9 @@ class PhimoeSparseMoeBlock(nn.Module):
         self.router_jitter_noise = config.router_jitter_noise
         self.input_jitter_noise = config.input_jitter_noise
 
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor,
+                use_probabilistic_routing: bool,
+                prob_routing_temp: float) -> torch.Tensor:
         """ """
         batch_size, sequence_length, hidden_dim = hidden_states.shape
         if self.training and self.input_jitter_noise > 0:
@@ -763,19 +771,19 @@ class PhimoeSparseMoeBlock(nn.Module):
         hidden_states = hidden_states.view(-1, hidden_dim)
         router_logits = self.gate(hidden_states)
 
-        routing_weights, selected_experts = sparsemixer(
-            router_logits,
-            jitter_eps=self.router_jitter_noise,
-            training=self.training,
-        )
-
+        
         if not use_probabilistic_routing:
+            routing_weights, selected_experts = sparsemixer(
+                router_logits,
+                jitter_eps=self.router_jitter_noise,
+                training=self.training,
+            )
             routing_weights, selected_experts = torch.topk(routing_weights, self.top_k, dim=-1)
         else:
+            routing_weights = F.softmax(router_logits, dim=1, dtype=torch.float)
             temp_scaled_logits = router_logits / prob_routing_temp
-            temp_scaled_weights = F.softmax(temp_scaled_logits, dim=1, dtype=torch.float)
+            temp_scaled_weights = F.softmax(temp_scaled_logits, dim=1)
             selected_experts = torch.multinomial(temp_scaled_weights, self.top_k, replacement=False)
-            #print(selected_experts.to('cpu').to(torch.get_default_dtype()))
             routing_weights = routing_weights.gather(dim=1, index=selected_experts)
 
         final_hidden_states = torch.zeros(
@@ -823,6 +831,8 @@ class PhimoeDecoderLayer(GradientCheckpointingLayer):
     def forward(
         self,
         hidden_states: torch.Tensor,
+        use_probabilistic_routing: bool,
+        prob_routing_temp: float,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
         past_key_value: Optional[tuple[torch.Tensor]] = None,
@@ -875,7 +885,9 @@ class PhimoeDecoderLayer(GradientCheckpointingLayer):
         # Fully Connected
         residual = hidden_states
         hidden_states = self.post_attention_layernorm(hidden_states)
-        hidden_states, router_logits = self.block_sparse_moe(hidden_states)
+        hidden_states, router_logits = self.block_sparse_moe(hidden_states, 
+                                    use_probabilistic_routing=use_probabilistic_routing,
+                                    prob_routing_temp=prob_routing_temp)
         hidden_states = residual + hidden_states
 
         outputs = (hidden_states,)
@@ -956,6 +968,8 @@ class PhimoeModel(PhimoePreTrainedModel):
     @auto_docstring
     def forward(
         self,
+        use_probabilistic_routing: bool,
+        prob_routing_temp: float,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -1033,6 +1047,8 @@ class PhimoeModel(PhimoePreTrainedModel):
 
             layer_outputs = decoder_layer(
                 hidden_states,
+                use_probabilistic_routing=use_probabilistic_routing,
+                prob_routing_temp=prob_routing_temp,
                 attention_mask=causal_mask,
                 position_ids=position_ids,
                 past_key_value=past_key_values,
@@ -1270,6 +1286,8 @@ class PhimoeForCausalLM(PhimoePreTrainedModel, GenerationMixin):
     @auto_docstring
     def forward(
         self,
+        use_probabilistic_routing: bool,
+        prob_routing_temp: float,
         input_ids: Optional[torch.LongTensor] = None,
         attention_mask: Optional[torch.Tensor] = None,
         position_ids: Optional[torch.LongTensor] = None,
@@ -1322,6 +1340,8 @@ class PhimoeForCausalLM(PhimoePreTrainedModel, GenerationMixin):
 
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
         outputs: MoeModelOutputWithPast = self.model(
+            use_probabilistic_routing=use_probabilistic_routing,  # <--- pass here
+            prob_routing_temp=prob_routing_temp, 
             input_ids=input_ids,
             attention_mask=attention_mask,
             position_ids=position_ids,
